@@ -1,0 +1,296 @@
+// SES業務管理システム Prisma スキーマ
+// Local-First: SQLite をデフォルト。enum は使わず String + TS定数(src/lib/enums.ts)で表現。
+// 配列・JSON は使わず、中間テーブル or 文字列カラムで表現（SQLite 互換）。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // Supabase Connection Pooler (port 6543, pgbouncer)
+  directUrl = env("DIRECT_URL")   // Supabase Direct connection (port 5432, migrate/seed用)
+}
+
+/// システム利用者（管理者/営業/経理/エンジニア）
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("ENGINEER") // UserRole: ADMIN/SALES/ACCOUNTING/ENGINEER
+  isActive     Boolean  @default(true)
+  engineerId   String?  @unique
+  engineer     Engineer? @relation(fields: [engineerId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// 技術者（自社エンジニア・協力会社要員）
+model Engineer {
+  id            String   @id @default(cuid())
+  code          String   @unique // 社員番号/要員番号
+  name          String
+  nameKana      String?
+  email         String?
+  phone         String?
+  employmentType String  @default("EMPLOYEE") // EmploymentType: EMPLOYEE/CONTRACT/BP(協力会社)
+  affiliation   String?  // 所属（自社部署 or 協力会社名）
+  status        String   @default("AVAILABLE") // EngineerStatus: ASSIGNED(稼働中)/AVAILABLE(待機)/PARTIAL(一部稼働)/LEAVING(退場予定)/RETIRED(退職)
+  costRate      Int      @default(0) // 原価単価（月額・円）
+  sellRateMin   Int      @default(0) // 提示単価下限（月額・円）
+  experienceYears Int    @default(0)
+  joinedOn      DateTime?
+  note          String?
+  // スキルシート（営業提案用経歴書）
+  initial        String?  // イニシャル（例: T.Y）
+  ageRange       String?  // 年代（例: 30代）
+  nearestStation String?  // 最寄駅
+  availableFrom  DateTime? // 稼働可能時期
+  finalEducation String?  // 最終学歴
+  prText         String?  // 得意分野・自己PR
+  skills        EngineerSkill[]
+  assignments   Assignment[]
+  offers        ProjectOffer[]
+  qualifications Qualification[]
+  workHistories WorkHistory[]
+  user          User?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+/// 保有資格（スキルシート用）
+model Qualification {
+  id         String   @id @default(cuid())
+  engineerId String
+  engineer   Engineer @relation(fields: [engineerId], references: [id], onDelete: Cascade)
+  name       String   // 資格名
+  acquiredOn DateTime? // 取得年月
+  createdAt  DateTime @default(now())
+}
+
+/// 職務経歴（スキルシートの中核。1案件=1レコード）
+model WorkHistory {
+  id           String   @id @default(cuid())
+  engineerId   String
+  engineer     Engineer @relation(fields: [engineerId], references: [id], onDelete: Cascade)
+  title        String   // 案件名/プロジェクト概要
+  industry     String?  // 業種（例: 金融、製造）
+  startOn      DateTime?
+  endOn        DateTime?
+  roleType     String   @default("SE") // WorkRole: PG/SE/PL/PM/OTHER
+  teamSize     Int?     // 規模（人数）
+  summary      String?  // 業務内容
+  technologies String?  // 使用技術（言語/FW/DB/OS/ツール。カンマ区切り）
+  phases       String?  // 担当工程（PhaseType キーのカンマ区切り）
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// スキルマスタ
+model SkillTag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  category  String   @default("OTHER") // SkillCategory: LANGUAGE/FRAMEWORK/DB/INFRA/CLOUD/ROLE/OTHER
+  engineers EngineerSkill[]
+  createdAt DateTime @default(now())
+}
+
+/// 技術者スキル（中間）
+model EngineerSkill {
+  id         String   @id @default(cuid())
+  engineerId String
+  skillId    String
+  level      Int      @default(3) // 1-5
+  engineer   Engineer @relation(fields: [engineerId], references: [id], onDelete: Cascade)
+  skill      SkillTag @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([engineerId, skillId])
+}
+
+/// 取引先（クライアント企業・エンド/元請）
+model Client {
+  id          String   @id @default(cuid())
+  name        String
+  nameKana    String?
+  clientType  String   @default("END") // ClientType: END(エンド)/PRIME(元請)/PARTNER(協力)
+  contactName String?
+  contactEmail String?
+  contactPhone String?
+  closingDay  Int      @default(31) // 締め日（請求）
+  paymentTermDays Int  @default(30) // 支払サイト（日）
+  address     String?
+  note        String?
+  projects    Project[]
+  invoices    Invoice[]
+  activities  SalesActivity[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// 案件（プロジェクト/募集ポジション）
+model Project {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  title         String
+  clientId      String
+  client        Client   @relation(fields: [clientId], references: [id])
+  contractType  String   @default("QUASI_MANDATE") // ContractType: QUASI_MANDATE(準委任)/DISPATCH(派遣)/CONTRACT(請負)
+  workLocation  String?  // 勤務地（リモート可等）
+  startOn       DateTime?
+  endOn         DateTime?
+  requiredCount Int      @default(1) // 必要人数
+  unitPriceMin  Int      @default(0) // 想定単価下限（月額・円）
+  unitPriceMax  Int      @default(0) // 想定単価上限（月額・円）
+  requiredSkills String? // 必須スキル（カンマ区切りメモ）
+  status        String   @default("OPEN") // ProjectStatus: OPEN(募集中)/PROPOSING(提案中)/ONGOING(稼働中)/CLOSED(終了)/LOST(失注)
+  description   String?
+  assignments   Assignment[]
+  offers        ProjectOffer[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+/// アサイン（技術者 × 案件 の割当）
+model Assignment {
+  id          String   @id @default(cuid())
+  engineerId  String
+  engineer    Engineer @relation(fields: [engineerId], references: [id])
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  status      String   @default("PROPOSED") // AssignmentStatus: PROPOSED(提案)/INTERVIEW(面談)/ORDERED(受注/参画決定)/ACTIVE(稼働中)/ENDED(終了)/DECLINED(見送り)
+  sellRate    Int      @default(0) // 客先請求単価（月額・円）
+  costRate    Int      @default(0) // 原価単価（月額・円）
+  startOn     DateTime?
+  endOn       DateTime?
+  standardHoursMin Int @default(140) // 精算下限（h）
+  standardHoursMax Int @default(180) // 精算上限（h）
+  note        String?
+  // 本人による継続意思（参画延長 or 離脱を本人が選択）
+  renewalIntent String  @default("UNDECIDED") // RenewalIntent: UNDECIDED(未回答)/EXTEND(延長希望)/LEAVE(離脱希望)
+  renewalNote   String? // 本人コメント（離脱理由・延長希望条件など）
+  renewalRespondedAt DateTime?
+  contract    Contract?
+  timesheets  Timesheet[]
+  invoiceItems InvoiceItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// 案件オファー（営業 → エンジニア宛て。本人が進める/辞退を選択）
+model ProjectOffer {
+  id              String   @id @default(cuid())
+  engineerId      String
+  engineer        Engineer @relation(fields: [engineerId], references: [id], onDelete: Cascade)
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status          String   @default("OFFERED") // OfferStatus: OFFERED(オファー中)/PROCEED(進める)/DECLINED(辞退)/WITHDRAWN(取下げ)
+  message         String?  // 営業からの推薦コメント
+  engineerComment String?  // 本人の回答コメント
+  respondedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([engineerId, projectId])
+}
+
+/// 契約（アサインに紐づく注文書/契約）
+model Contract {
+  id           String   @id @default(cuid())
+  assignmentId String   @unique
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  contractNo   String   @unique
+  contractType String   @default("QUASI_MANDATE") // ContractType
+  signedOn     DateTime?
+  startOn      DateTime?
+  endOn        DateTime?
+  autoRenew    Boolean  @default(true)
+  status       String   @default("DRAFT") // ContractStatus: DRAFT(作成中)/SENT(送付済)/SIGNED(締結済)/EXPIRED(終了)
+  note         String?
+
+  // ===== 単価 =====
+  rateType         String  @default("MONTHLY") // RateType: MONTHLY(月額)/HOURLY(時給)。実単価の区分
+  monthlyRate      Int     @default(0) // 契約単価（実単価）※スタッフのみ閲覧。rateType=HOURLYのときは時給(円/h)
+  engineerRate     Int?    // エンジニア提示単価（本人に見せる単価。未設定なら非表示）
+  engineerRateType String  @default("MONTHLY") // 提示額の単位 MONTHLY(月額)/HOURLY(時給)。時給契約でも本人へは月額提示が可能
+
+  // ===== 精算条件 =====
+  settlementType String @default("RANGE") // SettlementType: RANGE(上限下限)/FIXED(固定)/BUSINESSDAY_BUFFER(営業日数×標準±バッファ)
+  lowerHours     Int?   // 精算下限(h)        ※RANGE
+  upperHours     Int?   // 精算上限(h)        ※RANGE
+  fixedHours     Int?   // 固定時間(h)        ※FIXED（精算する場合の基準）
+  dailyStdHours  Float? // 1日標準稼働(h)     ※BUSINESSDAY_BUFFER
+  bufferHours    Int?   // ±バッファ時間(h)   ※BUSINESSDAY_BUFFER
+
+  // ===== 控除・超過単価 =====
+  settlementMethod String @default("MIDDLE") // SettlementMethod: MIDDLE(中間割)/UPPER_LOWER(上下割)/MANUAL(個別指定)/NONE(精算なし)
+  deductionRate    Int?   // 控除単価(円/h)  ※MANUAL時に使用、それ以外は自動算出
+  excessRate       Int?   // 超過単価(円/h)  ※MANUAL時に使用、それ以外は自動算出
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// 工数（アサイン × 対象年月）
+model Timesheet {
+  id           String   @id @default(cuid())
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  yearMonth    String   // "2026-06"
+  workedHours  Float    @default(0)
+  status       String   @default("DRAFT") // TimesheetStatus: DRAFT/SUBMITTED/APPROVED
+  approvedById String?
+  note         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([assignmentId, yearMonth])
+}
+
+/// 請求（取引先 × 対象年月）
+model Invoice {
+  id          String   @id @default(cuid())
+  invoiceNo   String   @unique
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  yearMonth   String   // 対象年月 "2026-06"
+  issueDate   DateTime?
+  dueDate     DateTime?
+  status      String   @default("DRAFT") // InvoiceStatus: DRAFT/ISSUED/SENT/PAID/OVERDUE
+  subtotal    Int      @default(0) // 税抜合計
+  taxRate     Int      @default(10)
+  taxAmount   Int      @default(0)
+  total       Int      @default(0) // 税込合計
+  note        String?
+  items       InvoiceItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// 請求明細
+model InvoiceItem {
+  id           String   @id @default(cuid())
+  invoiceId    String
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  assignmentId String?
+  assignment   Assignment? @relation(fields: [assignmentId], references: [id])
+  description  String   // 明細名（例: 山田太郎 6月稼働分）
+  unitPrice    Int      @default(0)
+  quantity     Float    @default(1)
+  amount       Int      @default(0)
+  note         String?
+}
+
+/// 営業活動（商談履歴）
+model SalesActivity {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  type      String   @default("VISIT") // ActivityType: VISIT(訪問)/CALL(電話)/MAIL(メール)/PROPOSAL(提案)/OTHER
+  subject   String
+  body      String?
+  activityDate DateTime @default(now())
+  ownerName String?
+  createdAt DateTime @default(now())
+}

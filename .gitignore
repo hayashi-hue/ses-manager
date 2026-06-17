@@ -1,0 +1,17 @@
+/node_modules
+/.next
+/out
+/build
+*.log
+.env
+.env*.local
+# SQLite の残骸（Postgres移行後は不要。どこに作られても除外）
+*.db
+*.db-journal
+prisma/dev.db
+prisma/prisma/
+next-env.d.ts
+.DS_Store
+# 勤務表の実データ（取込元）は配布物に含めない。サンプルのみ任意
+勤務表/*.xlsx
+勤務表/*.xls
