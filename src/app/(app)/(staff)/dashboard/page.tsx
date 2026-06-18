@@ -107,7 +107,7 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* 離脱希望・未回答オファー アラート */}
+      {/* 離脱希望・未回答提案 アラート */}
       {(leaveIntents.length > 0 || pendingOfferCount > 0) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <Card className="p-5 border-l-4 border-l-orange-400">

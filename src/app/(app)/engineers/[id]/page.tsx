@@ -49,7 +49,7 @@ export default async function EngineerDetailPage({
             <LinkButton href={`/engineers/${engineer.id}/skillsheet`} variant="ghost">
               📄 スキルシート
             </LinkButton>
-            <LinkButton href={`/offers?engineerId=${engineer.id}`}>📨 案件をオファー</LinkButton>
+            <LinkButton href={`/offers?engineerId=${engineer.id}`}>📨 案件を提案</LinkButton>
             <LinkButton href={`/engineers/${engineer.id}/edit`} variant="ghost">
               編集
             </LinkButton>

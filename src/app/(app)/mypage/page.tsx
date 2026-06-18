@@ -72,7 +72,7 @@ export default async function MyPage() {
     <div className="max-w-4xl">
       <PageHeader
         title={`こんにちは、${engineer.name} さん`}
-        subtitle="現在の参画状況の確認・継続意思の表明、案件オファーへの回答ができます"
+        subtitle="現在の参画状況の確認・継続意思の表明、案件提案への回答ができます"
       />
 
       {/* スキルサマリー */}
@@ -258,7 +258,7 @@ export default async function MyPage() {
         )}
       </div>
 
-      {/* 回答済みオファー履歴 */}
+      {/* 回答済み提案履歴 */}
       {pastOffers.length > 0 && (
         <>
           <h2 className="font-bold text-gray-900 mb-3">案件回答履歴</h2>

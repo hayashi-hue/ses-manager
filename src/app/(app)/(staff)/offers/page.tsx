@@ -161,9 +161,9 @@ export default async function SalesPage({
         )}
       </Card>
 
-      {/* エンジニアへ案件をオファー（提案メール送信） */}
+      {/* エンジニアへ案件を提案（提案メール送信） */}
       <Card className="p-5">
-        <h2 className="font-bold text-gray-900 mb-3 text-sm">エンジニアへ案件をオファー（提案メール）</h2>
+        <h2 className="font-bold text-gray-900 mb-3 text-sm">エンジニアへ案件を提案（提案メール）</h2>
         <form action={createOffer} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
           <Field label="技術者" required>
             <Select name="engineerId" required defaultValue={sp.engineerId || ""}>
@@ -191,7 +191,7 @@ export default async function SalesPage({
             </Field>
           </div>
           <div>
-            <SubmitButton>オファーを送信</SubmitButton>
+            <SubmitButton>提案を送信</SubmitButton>
           </div>
         </form>
       </Card>

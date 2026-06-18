@@ -129,7 +129,7 @@ export default async function MatchingPage({
                       href={`/offers?engineerId=${e.id}`}
                       className="text-xs text-blue-600 hover:underline"
                     >
-                      📨 案件をオファー
+                      📨 案件を提案
                     </Link>
                     <Link
                       href={`/assignments/new?engineerId=${e.id}`}

@@ -606,11 +606,11 @@ export async function respondRenewal(formData: FormData) {
   redirect("/mypage");
 }
 
-/* ========== 案件オファー（営業 → エンジニア） ========== */
+/* ========== 案件提案（営業 → エンジニア） ========== */
 export async function createOffer(formData: FormData) {
   const user = await ensureAuth();
   if (user.role !== "ADMIN" && user.role !== "SALES") {
-    throw new Error("オファーの送信権限がありません。");
+    throw new Error("提案の送信権限がありません。");
   }
   const engineerId = String(formData.get("engineerId") || "");
   const projectId = String(formData.get("projectId") || "");
@@ -618,7 +618,7 @@ export async function createOffer(formData: FormData) {
   const redirectTo = String(formData.get("redirectTo") || "/offers");
   if (!engineerId || !projectId) throw new Error("技術者と案件は必須です。");
 
-  // 同一エンジニア×案件は1件（再オファー時は再オープン）
+  // 同一エンジニア×案件は1件（再提案時は再オープン）
   await prisma.projectOffer.upsert({
     where: { engineerId_projectId: { engineerId, projectId } },
     update: { status: "OFFERED", message, engineerComment: null, respondedAt: null },
@@ -638,7 +638,7 @@ export async function respondOffer(formData: FormData) {
     throw new Error("回答内容が不正です。");
   }
   const offer = await prisma.projectOffer.findUnique({ where: { id: offerId } });
-  if (!offer) throw new Error("オファーが見つかりません。");
+  if (!offer) throw new Error("提案が見つかりません。");
 
   // 本人のみ回答可（管理者代理も許可）
   const myEngineerId = await getCurrentEngineerId();

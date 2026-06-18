@@ -245,7 +245,7 @@ export const OfferStatus = {
   WITHDRAWN: "WITHDRAWN",
 } as const;
 export const OfferStatusLabel: Record<string, string> = {
-  OFFERED: "オファー中",
+  OFFERED: "提案中",
   PROCEED: "進める",
   DECLINED: "辞退",
   WITHDRAWN: "取下げ",
