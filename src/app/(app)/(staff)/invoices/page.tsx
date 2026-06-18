@@ -18,7 +18,10 @@ export default async function InvoicesPage({
   const invoices = await prisma.invoice.findMany({
     where: { yearMonth: ym },
     orderBy: { invoiceNo: "asc" },
-    include: { client: true, _count: { select: { items: true } } },
+    include: {
+      client: true,
+      items: { include: { assignment: { include: { engineer: true } } } },
+    },
   });
 
   const total = invoices.reduce((s, i) => s + i.total, 0);
@@ -30,12 +33,30 @@ export default async function InvoicesPage({
         title="請求管理"
         subtitle={`${formatYearMonth(ym)}　請求 ${invoices.length} 件・合計 ${yen(total)}・入金済 ${yen(paid)}`}
         action={
-          <form action={generateInvoices} className="flex items-center gap-2">
-            <input type="hidden" name="yearMonth" value={ym} />
-            <button className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
-              ＋ 当月分の請求を自動生成
-            </button>
-          </form>
+          <div className="flex items-center gap-2">
+            {invoices.length > 0 && (
+              <>
+                <a
+                  href={`/invoices/zip?ym=${ym}&type=pdf`}
+                  className="px-3 py-2 rounded-lg bg-rose-50 text-rose-600 text-sm font-medium hover:bg-rose-100"
+                >
+                  PDF一括DL
+                </a>
+                <a
+                  href={`/invoices/zip?ym=${ym}&type=excel`}
+                  className="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-600 text-sm font-medium hover:bg-emerald-100"
+                >
+                  Excel一括DL
+                </a>
+              </>
+            )}
+            <form action={generateInvoices} className="flex items-center gap-2">
+              <input type="hidden" name="yearMonth" value={ym} />
+              <button className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+                ＋ 当月分の請求を自動生成
+              </button>
+            </form>
+          </div>
         }
       />
 
@@ -69,15 +90,19 @@ export default async function InvoicesPage({
               <>
                 <Th>請求番号</Th>
                 <Th>取引先</Th>
-                <Th className="text-center">明細</Th>
+                <Th>担当</Th>
                 <Th className="text-right">税抜</Th>
                 <Th className="text-right">税込</Th>
+                <Th className="text-center">出力</Th>
                 <Th>状態</Th>
                 <Th></Th>
               </>
             }
           >
-            {invoices.map((inv) => (
+            {invoices.map((inv) => {
+              const eng = inv.items.find((it) => it.assignment?.engineer)?.assignment
+                ?.engineer;
+              return (
               <tr key={inv.id} className="hover:bg-gray-50">
                 <Td>
                   <Link href={`/invoices/${inv.id}`} className="font-mono text-xs text-indigo-600 hover:underline">
@@ -85,9 +110,25 @@ export default async function InvoicesPage({
                   </Link>
                 </Td>
                 <Td className="text-gray-700">{inv.client.name}</Td>
-                <Td className="text-center text-gray-600">{inv._count.items}</Td>
+                <Td className="text-gray-700">
+                  {eng ? `${eng.name}（${eng.code}）` : "—"}
+                </Td>
                 <Td className="text-right text-gray-600">{yen(inv.subtotal)}</Td>
                 <Td className="text-right font-medium">{yen(inv.total)}</Td>
+                <Td className="text-center whitespace-nowrap">
+                  <a
+                    href={`/invoices/${inv.id}/pdf`}
+                    className="text-xs px-2 py-1 rounded bg-rose-50 text-rose-600 hover:bg-rose-100 mr-1"
+                  >
+                    PDF
+                  </a>
+                  <a
+                    href={`/invoices/${inv.id}/excel`}
+                    className="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                  >
+                    Excel
+                  </a>
+                </Td>
                 <Td>
                   <Badge className={InvoiceStatusColor[inv.status]}>
                     {InvoiceStatusLabel[inv.status]}
@@ -117,7 +158,8 @@ export default async function InvoicesPage({
                   </div>
                 </Td>
               </tr>
-            ))}
+              );
+            })}
           </Table>
         )}
       </Card>

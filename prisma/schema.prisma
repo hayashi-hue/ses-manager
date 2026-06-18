@@ -208,6 +208,7 @@ model Contract {
   autoRenew    Boolean  @default(true)
   status       String   @default("DRAFT") // ContractStatus: DRAFT(作成中)/SENT(送付済)/SIGNED(締結済)/EXPIRED(終了)
   note         String?
+  paymentTermDays Int?   // 支払サイト（日数）。契約ごとに設定。未設定なら取引先(Client)の既定を使用
 
   // ===== 単価 =====
   rateType         String  @default("MONTHLY") // RateType: MONTHLY(月額)/HOURLY(時給)。実単価の区分
@@ -280,6 +281,21 @@ model InvoiceItem {
   quantity     Float    @default(1)
   amount       Int      @default(0)
   note         String?
+}
+
+/// 自社（請求元）情報。請求書に印字する会社情報を管理画面から編集可能にする。
+/// シングルトン（id="default" の1行のみ）。振込先は改行区切りで複数行を保持。
+model CompanySetting {
+  id                 String   @id @default("default")
+  name               String
+  registrationNumber String   @default("") // インボイス登録番号
+  postalCode         String   @default("")
+  address1           String   @default("")
+  address2           String   @default("")
+  tel                String   @default("")
+  banks              String   @default("") // 振込先（改行区切り）
+  feeNote            String   @default("")
+  updatedAt          DateTime @updatedAt
 }
 
 /// 営業活動（商談履歴）

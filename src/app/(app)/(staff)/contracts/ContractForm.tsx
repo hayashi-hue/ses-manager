@@ -25,6 +25,7 @@ type ContractData = {
   autoRenew: boolean;
   status: string;
   note: string | null;
+  paymentTermDays: number | null;
   rateType: string;
   monthlyRate: number;
   engineerRate: number | null;
@@ -124,6 +125,19 @@ export default function ContractForm({
               <input type="checkbox" name="autoRenew" defaultChecked={contract?.autoRenew ?? true} className="w-4 h-4" />
               自動更新あり
             </label>
+          </Field>
+          <Field
+            label="支払サイト（日数）"
+            hint="この契約の請求の支払期限日 ＝ 請求日 ＋ 日数。空欄なら取引先の既定を使用"
+          >
+            <Input
+              type="number"
+              name="paymentTermDays"
+              min={0}
+              step={1}
+              defaultValue={contract?.paymentTermDays ?? ""}
+              placeholder="例: 60（翌々月末相当）"
+            />
           </Field>
         </div>
       </section>

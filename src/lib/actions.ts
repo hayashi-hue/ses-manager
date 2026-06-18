@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "./db";
-import { toInt, toFloat, toDate, calcTax } from "./utils";
+import { toInt, toFloat, toDate, calcTax, yen } from "./utils";
+import { calcMonthlySettlement } from "./settlement";
+import { COMPANY_SINGLETON_ID } from "./company";
 import {
   createSession,
   destroySession,
@@ -318,42 +320,133 @@ export async function generateInvoices(formData: FormData) {
   if (!yearMonth) throw new Error("対象年月を指定してください。");
 
   // 対象月に稼働中のアサインを取引先ごとに集約して請求を生成
+  // 契約（精算条件・実単価）と当月工数を取り込み、控除/超過を独立明細として展開する
   const assignments = await prisma.assignment.findMany({
     where: { status: { in: ["ACTIVE", "ORDERED", "ENDED"] } },
-    include: { engineer: true, project: { include: { client: true } } },
+    include: {
+      engineer: true,
+      project: { include: { client: true } },
+      contract: true,
+      timesheets: { where: { yearMonth } },
+    },
   });
 
-  // 取引先ごとにグルーピング
-  const byClient = new Map<string, typeof assignments>();
+  // 1人ずつ（取引先 × エンジニア）でグルーピング。
+  // 同一エンジニアが同一取引先で複数アサインを持つ場合のみ1通に集約する。
+  const byPerson = new Map<string, typeof assignments>();
   for (const a of assignments) {
-    const cid = a.project.clientId;
-    if (!byClient.has(cid)) byClient.set(cid, []);
-    byClient.get(cid)!.push(a);
+    const key = `${a.project.clientId}__${a.engineerId}`;
+    if (!byPerson.has(key)) byPerson.set(key, []);
+    byPerson.get(key)!.push(a);
   }
 
+  // 対象月の期間表記（YYYY年MM月DD日）
+  const [yy, mm] = yearMonth.split("-").map(Number);
+  const lastDay = new Date(yy, mm, 0).getDate();
+  const mmStr = String(mm).padStart(2, "0");
+  const periodStart = `${yy}年${mmStr}月01日`;
+  const periodEnd = `${yy}年${mmStr}月${String(lastDay).padStart(2, "0")}日`;
+  const fmtH = (h: number) => String(h);
+
+  type NewItem = {
+    assignmentId: string;
+    description: string;
+    unitPrice: number;
+    quantity: number;
+    amount: number;
+  };
+
+  // 請求番号の重複回避（要員番号ベース）
+  const usedNos = new Set<string>();
+  const uniqueInvoiceNo = async (code: string): Promise<string> => {
+    const base = `INV-${yearMonth.replace("-", "")}-${code || "000"}`;
+    let cand = base;
+    let n = 1;
+    while (usedNos.has(cand) || (await prisma.invoice.findUnique({ where: { invoiceNo: cand } }))) {
+      n += 1;
+      cand = `${base}-${n}`;
+    }
+    usedNos.add(cand);
+    return cand;
+  };
+
   let created = 0;
-  for (const [clientId, list] of byClient) {
-    // 既存の同月請求があればスキップ
-    const exists = await prisma.invoice.findFirst({ where: { clientId, yearMonth } });
+  for (const list of byPerson.values()) {
+    // 既存（同月・同一アサイン）があればスキップ
+    const assignmentIds = list.map((a) => a.id);
+    const exists = await prisma.invoice.findFirst({
+      where: { yearMonth, items: { some: { assignmentId: { in: assignmentIds } } } },
+    });
     if (exists) continue;
 
-    const items = list.map((a) => ({
-      assignmentId: a.id,
-      description: `${a.engineer.name}／${a.project.title}（${yearMonth} 稼働分）`,
-      unitPrice: a.sellRate,
-      quantity: 1,
-      amount: a.sellRate,
-    }));
+    const client = list[0].project.client;
+    const items: NewItem[] = [];
+
+    for (const a of list) {
+      const contract = a.contract;
+      const worked = a.timesheets[0]?.workedHours ?? null;
+      // 実単価（客先請求）。契約があれば契約の実単価、無ければアサインの請求単価
+      const baseRate = contract?.monthlyRate || a.sellRate;
+      const descBase = `件名：${a.project.title}\n${a.engineer.name} ${periodStart}〜${periodEnd}`;
+
+      // 契約が時給の場合：実働時間 × 時給
+      if (contract && contract.rateType === "HOURLY" && worked != null) {
+        const amt = Math.round(baseRate * worked);
+        items.push({ assignmentId: a.id, description: descBase, unitPrice: baseRate, quantity: worked, amount: amt });
+        continue;
+      }
+
+      // 基準額（月額）の明細
+      items.push({ assignmentId: a.id, description: descBase, unitPrice: baseRate, quantity: 1, amount: baseRate });
+
+      // 精算（控除/超過）を独立明細として展開（契約＋当月工数がある場合のみ）
+      if (contract && worked != null) {
+        const s = calcMonthlySettlement(
+          {
+            rateType: contract.rateType,
+            settlementType: contract.settlementType,
+            lowerHours: contract.lowerHours,
+            upperHours: contract.upperHours,
+            fixedHours: contract.fixedHours,
+            dailyStdHours: contract.dailyStdHours,
+            bufferHours: contract.bufferHours,
+            settlementMethod: contract.settlementMethod,
+            deductionRate: contract.deductionRate,
+            excessRate: contract.excessRate,
+          },
+          { yearMonth, workedHours: worked, baseRate }
+        );
+        if (s.status === "deduct" && s.unitRate != null) {
+          const desc = `【控除精算分】\n（${fmtH(worked)}h - ${fmtH(s.lower ?? 0)}h => ${-s.diffHours} × ${yen(s.unitRate)}）`;
+          items.push({ assignmentId: a.id, description: desc, unitPrice: s.adjustment, quantity: 1, amount: s.adjustment });
+        } else if (s.status === "excess" && s.unitRate != null) {
+          const desc = `【超過精算分】\n（${fmtH(worked)}h - ${fmtH(s.upper ?? 0)}h => +${s.diffHours} × ${yen(s.unitRate)}）`;
+          items.push({ assignmentId: a.id, description: desc, unitPrice: s.adjustment, quantity: 1, amount: s.adjustment });
+        }
+      }
+    }
+
     const subtotal = items.reduce((s, i) => s + i.amount, 0);
     if (subtotal === 0) continue;
     const { tax, total } = calcTax(subtotal, 10);
-    const seq = String(created + 1).padStart(3, "0");
+
+    // 請求日＝締め日（その月）、支払期限日＝請求日＋支払サイト
+    // 支払サイトは契約ごとの設定を優先し、無ければ取引先の既定を使用
+    const termDays = list[0].contract?.paymentTermDays ?? client.paymentTermDays;
+    const closeDay = client.closingDay >= 31 ? lastDay : Math.min(client.closingDay, lastDay);
+    const issueDate = new Date(yy, mm - 1, closeDay);
+    const dueDate = new Date(issueDate);
+    dueDate.setDate(dueDate.getDate() + termDays);
+
+    const invoiceNo = await uniqueInvoiceNo(list[0].engineer.code);
     await prisma.invoice.create({
       data: {
-        invoiceNo: `INV-${yearMonth.replace("-", "")}-${seq}`,
-        clientId,
+        invoiceNo,
+        clientId: client.id,
         yearMonth,
         status: "DRAFT",
+        issueDate,
+        dueDate,
         subtotal,
         taxRate: 10,
         taxAmount: tax,
@@ -408,6 +501,8 @@ export async function saveContract(formData: FormData) {
     autoRenew: formData.get("autoRenew") === "on",
     status: String(formData.get("status") || "DRAFT"),
     note: String(formData.get("note") || "").trim() || null,
+    paymentTermDays: intOrNull("paymentTermDays"), // 支払サイト（日数）。契約ごと
+
     // 単価
     rateType: String(formData.get("rateType") || "MONTHLY"),
     monthlyRate: toInt(formData.get("monthlyRate")),
@@ -440,6 +535,31 @@ export async function deleteContract(formData: FormData) {
   if (id) await prisma.contract.delete({ where: { id } });
   revalidatePath("/contracts");
   redirect("/contracts");
+}
+
+/* ========== 会社情報（請求元）設定 ========== */
+export async function saveCompanySetting(formData: FormData) {
+  const user = await ensureAuth();
+  if (user.role !== "ADMIN") throw new Error("会社情報の編集は管理者のみ可能です。");
+  const data = {
+    name: String(formData.get("name") || "").trim(),
+    registrationNumber: String(formData.get("registrationNumber") || "").trim(),
+    postalCode: String(formData.get("postalCode") || "").trim(),
+    address1: String(formData.get("address1") || "").trim(),
+    address2: String(formData.get("address2") || "").trim(),
+    tel: String(formData.get("tel") || "").trim(),
+    banks: String(formData.get("banks") || "").replace(/\r\n/g, "\n").trim(),
+    feeNote: String(formData.get("feeNote") || "").trim(),
+  };
+  if (!data.name) throw new Error("会社名は必須です。");
+  await prisma.companySetting.upsert({
+    where: { id: COMPANY_SINGLETON_ID },
+    create: { id: COMPANY_SINGLETON_ID, ...data },
+    update: data,
+  });
+  revalidatePath("/settings/company");
+  revalidatePath("/invoices");
+  redirect("/settings/company?saved=1");
 }
 
 /* ========== 営業活動 ========== */

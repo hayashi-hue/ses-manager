@@ -30,7 +30,12 @@ export default function Sidebar({
   roleKey: string;
 }) {
   const pathname = usePathname();
-  const NAV = roleKey === "ENGINEER" ? ENGINEER_NAV : STAFF_NAV;
+  const NAV =
+    roleKey === "ENGINEER"
+      ? ENGINEER_NAV
+      : roleKey === "ADMIN"
+        ? [...STAFF_NAV, { href: "/settings/company", label: "会社情報設定", icon: "⚙️" }]
+        : STAFF_NAV;
   return (
     <aside className="w-60 shrink-0 bg-slate-900 text-slate-100 min-h-screen flex flex-col">
       <div className="px-5 py-5 border-b border-slate-700">
