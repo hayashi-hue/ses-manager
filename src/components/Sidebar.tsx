@@ -8,7 +8,7 @@ const STAFF_NAV = [
   { href: "/engineers", label: "技術者管理", icon: "👷" },
   { href: "/projects", label: "案件管理", icon: "📁" },
   { href: "/assignments", label: "アサイン・要員配置", icon: "🔗" },
-  { href: "/offers", label: "案件オファー", icon: "📨" },
+  { href: "/offers", label: "営業管理", icon: "📣" },
   { href: "/contracts", label: "契約管理", icon: "📝" },
   { href: "/timesheets", label: "工数・稼働実績", icon: "🕐" },
   { href: "/invoices", label: "請求管理", icon: "💴" },

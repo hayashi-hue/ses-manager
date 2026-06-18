@@ -138,7 +138,7 @@ export default async function DashboardPage() {
           </Card>
           <Card className="p-5 border-l-4 border-l-blue-400">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold text-gray-900 text-sm">📨 回答待ちの案件オファー</h2>
+              <h2 className="font-bold text-gray-900 text-sm">📨 回答待ちの提案案件</h2>
               <Link href="/offers" className="text-xs text-indigo-600 hover:underline">
                 一覧へ →
               </Link>
