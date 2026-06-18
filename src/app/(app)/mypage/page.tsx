@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getCurrentUser, getCurrentEngineerId } from "@/lib/auth";
-import { respondRenewal, respondOffer } from "@/lib/actions";
+import { respondRenewal, respondOffer, cancelWorkflowRequest } from "@/lib/actions";
 import { yen, formatDate, formatYearMonth, presentedRateUnit } from "@/lib/utils";
+import RequestForm from "@/components/RequestForm";
+import { requestSummary } from "@/lib/workflow";
 import {
   settlementHoursText,
   settlementRatesText,
@@ -19,11 +21,20 @@ import {
   OfferStatusLabel,
   OfferStatusColor,
   ContractTypeLabel,
+  RequestTypeLabel,
+  RequestTypeIcon,
+  RequestStatusLabel,
+  RequestStatusColor,
 } from "@/lib/enums";
 
 export const dynamic = "force-dynamic";
 
-export default async function MyPage() {
+export default async function MyPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ requested?: string }>;
+}) {
+  const sp = await searchParams;
   const user = await getCurrentUser();
   const engineerId = await getCurrentEngineerId();
 
@@ -61,6 +72,7 @@ export default async function MyPage() {
         include: { project: { include: { client: true } } },
         orderBy: { updatedAt: "desc" },
       },
+      workflowRequests: { orderBy: { createdAt: "desc" } },
     },
   });
   if (!engineer) return null;
@@ -282,6 +294,47 @@ export default async function MyPage() {
             </div>
           </Card>
         </>
+      )}
+
+      {/* 各種申請（交通費・経費・休暇など） */}
+      <h2 className="font-bold text-gray-900 mb-3 mt-8">各種申請</h2>
+      {sp.requested && (
+        <div className="mb-3">
+          <Badge className="bg-emerald-100 text-emerald-700">申請を受け付けました</Badge>
+        </div>
+      )}
+      <Card className="p-5 mb-4">
+        <RequestForm selfName={engineer.name} cancelHref="/mypage" />
+      </Card>
+
+      {engineer.workflowRequests.length > 0 && (
+        <Card className="mb-8">
+          <div className="divide-y divide-gray-100">
+            {engineer.workflowRequests.map((r) => (
+              <div key={r.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="text-sm text-gray-800">
+                    {RequestTypeIcon[r.type]} {RequestTypeLabel[r.type]}
+                  </span>
+                  <span className="text-xs text-gray-500 ml-2">{requestSummary(r)}</span>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    申請日 {formatDate(r.createdAt)}
+                    {r.decisionComment && <>／{r.decisionComment}</>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge className={RequestStatusColor[r.status]}>{RequestStatusLabel[r.status]}</Badge>
+                  {r.status === "SUBMITTED" && (
+                    <form action={cancelWorkflowRequest}>
+                      <input type="hidden" name="id" value={r.id} />
+                      <button className="text-xs text-gray-400 hover:text-rose-600">取消</button>
+                    </form>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       <p className="text-xs text-gray-400 mt-6">

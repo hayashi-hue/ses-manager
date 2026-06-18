@@ -6,6 +6,14 @@ import { prisma } from "./db";
 import { toInt, toFloat, toDate, calcTax, yen } from "./utils";
 import { calcMonthlySettlement } from "./settlement";
 import { COMPANY_SINGLETON_ID } from "./company";
+import { RequestTypeLabel } from "./enums";
+import {
+  isItemType,
+  isLeaveType,
+  isWithinSummerWindow,
+  summerLeaveInfo,
+  inclusiveDays,
+} from "./workflow";
 import {
   createSession,
   destroySession,
@@ -560,6 +568,201 @@ export async function saveCompanySetting(formData: FormData) {
   revalidatePath("/settings/company");
   revalidatePath("/invoices");
   redirect("/settings/company?saved=1");
+}
+
+/* ========== 各種申請（ワークフロー） ========== */
+type NewRequestItem = {
+  itemDate: Date | null;
+  fromPlace: string | null;
+  toPlace: string | null;
+  roundTrip: boolean;
+  amount: number;
+  note: string | null;
+  sortOrder: number;
+};
+
+export async function createWorkflowRequest(formData: FormData) {
+  const user = await ensureAuth();
+  const type = String(formData.get("type") || "");
+  if (!RequestTypeLabel[type]) throw new Error("申請種別が不正です。");
+
+  // 対象者（ENGINEERは自分のみ。スタッフは選択した対象者で代行申請）
+  let engineerId = String(formData.get("engineerId") || "");
+  if (user.role === "ENGINEER") {
+    const selfId = await getCurrentEngineerId();
+    if (!selfId) throw new Error("技術者プロフィールが紐づいていません。");
+    engineerId = selfId;
+  }
+  if (!engineerId) throw new Error("対象者を選択してください。");
+
+  const startDate = toDate(formData.get("startDate"));
+  const endDate = toDate(formData.get("endDate"));
+  const reason = String(formData.get("reason") || "").trim() || null;
+  const category = String(formData.get("category") || "").trim() || null;
+
+  let items: NewRequestItem[] = [];
+  let amount: number | null = null;
+  let passPeriodMonths: number | null = null;
+  let leaveUnit: string | null = null;
+  let hours: number | null = null;
+  let days: number | null = null;
+
+  // 明細（交通費・経費・定期券）
+  if (isItemType(type)) {
+    const dates = formData.getAll("itemDate");
+    const froms = formData.getAll("fromPlace");
+    const tos = formData.getAll("toPlace");
+    const rts = formData.getAll("roundTrip");
+    const amts = formData.getAll("itemAmount");
+    const notes = formData.getAll("itemNote");
+    const n = Math.max(amts.length, dates.length, froms.length, tos.length, notes.length);
+    for (let i = 0; i < n; i++) {
+      const a = toInt(amts[i] ?? null);
+      const from = String(froms[i] ?? "").trim();
+      const to = String(tos[i] ?? "").trim();
+      const note = String(notes[i] ?? "").trim();
+      if (a === 0 && !from && !to && !note) continue; // 空行スキップ
+      items.push({
+        itemDate: toDate(dates[i] ?? null),
+        fromPlace: from || null,
+        toPlace: to || null,
+        roundTrip: String(rts[i] ?? "0") === "1",
+        amount: a,
+        note: note || null,
+        sortOrder: i,
+      });
+    }
+    if (items.length === 0) throw new Error("明細を1行以上入力してください。");
+    amount = items.reduce((s, it) => s + it.amount, 0);
+    if (type === "COMMUTER_PASS") {
+      passPeriodMonths = toInt(formData.get("passPeriodMonths")) || null;
+    }
+  }
+
+  // 有給休暇（全休/半休/時間休）
+  if (type === "PAID_LEAVE") {
+    leaveUnit = String(formData.get("leaveUnit") || "FULL");
+    if (!startDate) throw new Error("取得日を入力してください。");
+    if (leaveUnit === "HOURLY") {
+      hours = toFloat(formData.get("hours"));
+      if (hours <= 0) throw new Error("時間休の時間数を入力してください。");
+    } else if (leaveUnit === "HALF") {
+      days = 0.5;
+    } else {
+      days = inclusiveDays(startDate, endDate);
+    }
+  }
+
+  // 夏季休暇・慶弔休暇（日数）
+  if (type === "SUMMER_LEAVE" || type === "CONDOLENCE_LEAVE") {
+    if (!startDate) throw new Error("対象日（開始日）を入力してください。");
+    const inputDays = toFloat(formData.get("days"));
+    days = inputDays > 0 ? inputDays : inclusiveDays(startDate, endDate);
+  }
+
+  // 健康診断
+  if (type === "HEALTH_CHECKUP" && !startDate) {
+    throw new Error("受診日を入力してください。");
+  }
+
+  // 夏季休暇ルール（6〜12月／7/1以降入社は付与なし／残日数チェック）
+  if (type === "SUMMER_LEAVE" && startDate) {
+    if (!isWithinSummerWindow(startDate)) {
+      throw new Error("夏季休暇は6月〜12月の期間で取得してください。");
+    }
+    const year = startDate.getFullYear();
+    const eng = await prisma.engineer.findUnique({
+      where: { id: engineerId },
+      select: { joinedOn: true, name: true },
+    });
+    const existing = await prisma.workflowRequest.findMany({
+      where: {
+        engineerId,
+        type: "SUMMER_LEAVE",
+        status: { in: ["SUBMITTED", "APPROVED"] },
+        startDate: { gte: new Date(year, 0, 1), lte: new Date(year, 11, 31, 23, 59, 59) },
+      },
+      select: { days: true },
+    });
+    const used = existing.reduce((s, r) => s + (r.days || 0), 0);
+    const info = summerLeaveInfo(eng?.joinedOn ?? null, year, used);
+    const req = days || 0;
+    if (!info.eligible) {
+      throw new Error(`${eng?.name ?? "対象者"}さんは${year}年の夏季休暇付与対象外です（7/1以降入社）。`);
+    }
+    if (req > info.remaining) {
+      throw new Error(`夏季休暇の残日数を超えています（残り ${info.remaining} 日／申請 ${req} 日）。`);
+    }
+  }
+
+  await prisma.workflowRequest.create({
+    data: {
+      type,
+      status: "SUBMITTED",
+      engineerId,
+      submittedByName: user.name,
+      startDate,
+      endDate,
+      leaveUnit,
+      hours,
+      days,
+      amount,
+      passPeriodMonths,
+      category,
+      reason,
+      items: items.length ? { create: items } : undefined,
+    },
+  });
+  revalidatePath("/workflows");
+  revalidatePath("/mypage");
+  revalidatePath("/dashboard");
+  if (user.role === "ENGINEER") redirect("/mypage?requested=1");
+  redirect("/workflows?created=1");
+}
+
+export async function decideWorkflowRequest(formData: FormData) {
+  const user = await ensureAuth();
+  if (user.role !== "ADMIN") throw new Error("承認・差戻しは管理者のみ可能です。");
+  const id = String(formData.get("id") || "");
+  const decision = String(formData.get("decision") || "");
+  const comment = String(formData.get("decisionComment") || "").trim() || null;
+  if (!id || (decision !== "APPROVED" && decision !== "REJECTED")) {
+    throw new Error("不正な操作です。");
+  }
+  await prisma.workflowRequest.update({
+    where: { id },
+    data: { status: decision, approverName: user.name, decidedAt: new Date(), decisionComment: comment },
+  });
+  revalidatePath("/workflows");
+  revalidatePath("/mypage");
+  revalidatePath("/dashboard");
+  redirect(`/workflows/${id}`);
+}
+
+export async function cancelWorkflowRequest(formData: FormData) {
+  const user = await ensureAuth();
+  const id = String(formData.get("id") || "");
+  const req = await prisma.workflowRequest.findUnique({ where: { id } });
+  if (!req) throw new Error("申請が見つかりません。");
+  if (user.role === "ENGINEER") {
+    const selfId = await getCurrentEngineerId();
+    if (req.engineerId !== selfId) throw new Error("操作権限がありません。");
+  }
+  if (req.status !== "SUBMITTED") throw new Error("申請中の申請のみ取消できます。");
+  await prisma.workflowRequest.update({ where: { id }, data: { status: "CANCELLED" } });
+  revalidatePath("/workflows");
+  revalidatePath("/mypage");
+  revalidatePath("/dashboard");
+  redirect(user.role === "ENGINEER" ? "/mypage" : "/workflows");
+}
+
+export async function deleteWorkflowRequest(formData: FormData) {
+  const user = await ensureAuth();
+  if (user.role !== "ADMIN") throw new Error("削除は管理者のみ可能です。");
+  const id = String(formData.get("id") || "");
+  if (id) await prisma.workflowRequest.delete({ where: { id } });
+  revalidatePath("/workflows");
+  redirect("/workflows");
 }
 
 /* ========== 営業活動 ========== */

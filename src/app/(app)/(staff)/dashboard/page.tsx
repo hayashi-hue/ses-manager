@@ -29,6 +29,7 @@ export default async function DashboardPage() {
     recentAssignments,
     leaveIntents,
     pendingOfferCount,
+    pendingRequestCount,
   ] = await Promise.all([
     prisma.engineer.findMany({ where: { status: { not: "RETIRED" } } }),
     prisma.assignment.findMany({
@@ -49,6 +50,7 @@ export default async function DashboardPage() {
       include: { engineer: true, project: { include: { client: true } } },
     }),
     prisma.projectOffer.count({ where: { status: "OFFERED" } }),
+    prisma.workflowRequest.count({ where: { status: "SUBMITTED" } }),
   ]);
 
   const totalActive = engineers.length;
@@ -107,9 +109,9 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* 離脱希望・未回答提案 アラート */}
-      {(leaveIntents.length > 0 || pendingOfferCount > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      {/* 離脱希望・未回答提案・承認待ち申請 アラート */}
+      {(leaveIntents.length > 0 || pendingOfferCount > 0 || pendingRequestCount > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <Card className="p-5 border-l-4 border-l-orange-400">
             <div className="flex items-center justify-between mb-2">
               <h2 className="font-bold text-gray-900 text-sm">
@@ -145,6 +147,16 @@ export default async function DashboardPage() {
             </div>
             <div className="text-3xl font-bold text-blue-600 mt-2">{pendingOfferCount} 件</div>
             <p className="text-xs text-gray-400 mt-1">エンジニアの回答を待っています</p>
+          </Card>
+          <Card className="p-5 border-l-4 border-l-amber-400">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-gray-900 text-sm">📋 承認待ちの申請</h2>
+              <Link href="/workflows?status=SUBMITTED" className="text-xs text-indigo-600 hover:underline">
+                一覧へ →
+              </Link>
+            </div>
+            <div className="text-3xl font-bold text-amber-600 mt-2">{pendingRequestCount} 件</div>
+            <p className="text-xs text-gray-400 mt-1">交通費・休暇などの承認待ち</p>
           </Card>
         </div>
       )}

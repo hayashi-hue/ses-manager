@@ -304,6 +304,72 @@ export const PhaseTypeShort: Record<string, string> = {
   MAINTENANCE: "保守",
 };
 
+// 申請種別（ワークフロー）
+export const RequestType = {
+  TRANSPORT: "TRANSPORT",
+  EXPENSE: "EXPENSE",
+  PAID_LEAVE: "PAID_LEAVE",
+  COMMUTER_PASS: "COMMUTER_PASS",
+  SUMMER_LEAVE: "SUMMER_LEAVE",
+  CONDOLENCE_LEAVE: "CONDOLENCE_LEAVE",
+  HEALTH_CHECKUP: "HEALTH_CHECKUP",
+} as const;
+export type RequestType = (typeof RequestType)[keyof typeof RequestType];
+export const RequestTypeLabel: Record<string, string> = {
+  TRANSPORT: "交通費精算",
+  EXPENSE: "経費精算",
+  PAID_LEAVE: "有給休暇",
+  COMMUTER_PASS: "定期券",
+  SUMMER_LEAVE: "夏季休暇",
+  CONDOLENCE_LEAVE: "慶弔休暇",
+  HEALTH_CHECKUP: "健康診断",
+};
+export const RequestTypeIcon: Record<string, string> = {
+  TRANSPORT: "🚃",
+  EXPENSE: "🧾",
+  PAID_LEAVE: "🏖️",
+  COMMUTER_PASS: "🎫",
+  SUMMER_LEAVE: "☀️",
+  CONDOLENCE_LEAVE: "🎌",
+  HEALTH_CHECKUP: "🩺",
+};
+
+// 申請ステータス
+export const RequestStatus = {
+  DRAFT: "DRAFT",
+  SUBMITTED: "SUBMITTED",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+  CANCELLED: "CANCELLED",
+} as const;
+export type RequestStatus = (typeof RequestStatus)[keyof typeof RequestStatus];
+export const RequestStatusLabel: Record<string, string> = {
+  DRAFT: "下書き",
+  SUBMITTED: "申請中",
+  APPROVED: "承認",
+  REJECTED: "差戻し",
+  CANCELLED: "取消",
+};
+export const RequestStatusColor: Record<string, string> = {
+  DRAFT: "bg-gray-200 text-gray-600",
+  SUBMITTED: "bg-amber-100 text-amber-700",
+  APPROVED: "bg-emerald-100 text-emerald-700",
+  REJECTED: "bg-rose-100 text-rose-600",
+  CANCELLED: "bg-gray-200 text-gray-500",
+};
+
+// 有給休暇の単位
+export const LeaveUnit = {
+  FULL: "FULL",
+  HALF: "HALF",
+  HOURLY: "HOURLY",
+} as const;
+export const LeaveUnitLabel: Record<string, string> = {
+  FULL: "全休（1日）",
+  HALF: "半休（0.5日）",
+  HOURLY: "時間休",
+};
+
 export const ActivityType = {
   VISIT: "VISIT",
   CALL: "CALL",

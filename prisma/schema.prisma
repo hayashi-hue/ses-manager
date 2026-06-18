@@ -54,6 +54,7 @@ model Engineer {
   offers        ProjectOffer[]
   qualifications Qualification[]
   workHistories WorkHistory[]
+  workflowRequests WorkflowRequest[]
   user          User?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -281,6 +282,49 @@ model InvoiceItem {
   quantity     Float    @default(1)
   amount       Int      @default(0)
   note         String?
+}
+
+/// 各種申請（交通費・経費・有給・定期券・夏季休暇・慶弔・健康診断）。1段階承認（管理者）。
+model WorkflowRequest {
+  id              String   @id @default(cuid())
+  type            String   // RequestType: TRANSPORT/EXPENSE/PAID_LEAVE/COMMUTER_PASS/SUMMER_LEAVE/CONDOLENCE_LEAVE/HEALTH_CHECKUP
+  status          String   @default("SUBMITTED") // RequestStatus: DRAFT/SUBMITTED/APPROVED/REJECTED/CANCELLED
+  engineerId      String   // 対象者（自社社員＝Engineer）
+  engineer        Engineer @relation(fields: [engineerId], references: [id], onDelete: Cascade)
+  submittedByName String?  // 申請者（本人 or 代行者の氏名）
+  // 期間・休暇
+  startDate       DateTime? // 対象日 / 期間開始 / 受診日 / 利用開始日
+  endDate         DateTime? // 期間終了
+  leaveUnit       String?   // LeaveUnit（有給: FULL/HALF/HOURLY）
+  hours           Float?    // 時間休の時間数
+  days            Float?    // 休暇日数（夏季休暇の残数管理に使用）
+  // 金額系
+  amount          Int?      // 交通費/経費/定期券 合計（円）
+  passPeriodMonths Int?     // 定期券 期間（1/3/6ヶ月）
+  // 区分・内容
+  category        String?   // 経費の費目 / 慶弔の事由 / 健康診断の受診機関
+  reason          String?   // 理由・目的・内容・備考
+  // 承認（1段階）
+  approverName    String?
+  decidedAt       DateTime?
+  decisionComment String?
+  items           WorkflowRequestItem[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// 申請明細（交通費の区間 / 経費の明細 / 定期券の区間）
+model WorkflowRequestItem {
+  id        String   @id @default(cuid())
+  requestId String
+  request   WorkflowRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  itemDate  DateTime?
+  fromPlace String?  // 出発（交通費/定期券）
+  toPlace   String?  // 到着
+  roundTrip Boolean  @default(false) // 往復
+  amount    Int      @default(0)
+  note      String?  // 費目・内容
+  sortOrder Int      @default(0)
 }
 
 /// 自社（請求元）情報。請求書に印字する会社情報を管理画面から編集可能にする。

@@ -12,6 +12,7 @@ const STAFF_NAV = [
   { href: "/contracts", label: "契約管理", icon: "📝" },
   { href: "/timesheets", label: "工数・稼働実績", icon: "🕐" },
   { href: "/invoices", label: "請求管理", icon: "💴" },
+  { href: "/workflows", label: "申請・承認", icon: "📋" },
   { href: "/clients", label: "取引先・営業", icon: "🏢" },
   { href: "/matching", label: "マッチング検索", icon: "🔍" },
 ];
