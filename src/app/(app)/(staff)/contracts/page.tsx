@@ -120,7 +120,13 @@ export default async function ContractsPage({
       : a.engineer.name.localeCompare(b.engineer.name, "ja")
   );
 
-  type Cell = { rate: number | null; hourly: boolean; bench: boolean; changed: boolean };
+  type Cell = {
+    rate: number | null;
+    hourly: boolean;
+    bench: boolean;
+    trend: "up" | "down" | "none";
+    isEnd: boolean;
+  };
   function buildCells(row: Row): Cell[] {
     const raw = months.map(({ y, m }) => {
       const mStart = new Date(y, m - 1, 1);
@@ -131,7 +137,9 @@ export default async function ContractsPage({
         const afterStart = !cs || new Date(cs) <= mEnd;
         const beforeEnd = !ce || new Date(ce) >= mStart;
         if (afterStart && beforeEnd) {
-          return { rate: c.monthlyRate, hourly: c.rateType === "HOURLY" };
+          // 契約終了月＝契約終了日がその月に含まれる
+          const isEnd = !!ce && new Date(ce) >= mStart && new Date(ce) <= mEnd;
+          return { rate: c.monthlyRate, hourly: c.rateType === "HOURLY", isEnd };
         }
       }
       return null;
@@ -141,12 +149,15 @@ export default async function ContractsPage({
     let prevRate: number | null = null;
     return raw.map((x, i) => {
       if (x) {
-        const changed = prevRate != null && prevRate !== x.rate;
+        let trend: "up" | "down" | "none" = "none";
+        if (prevRate != null && x.rate > prevRate) trend = "up";
+        else if (prevRate != null && x.rate < prevRate) trend = "down";
         prevRate = x.rate;
-        return { rate: x.rate, hourly: x.hourly, bench: false, changed };
+        return { rate: x.rate, hourly: x.hourly, bench: false, trend, isEnd: x.isEnd };
       }
+      // 稼動がない月（契約の谷間＝待機・育休・休職など）
       const bench = firstIdx >= 0 && i > firstIdx && i < lastIdx;
-      return { rate: null, hourly: false, bench, changed: false };
+      return { rate: null, hourly: false, bench, trend: "none" as const, isEnd: false };
     });
   }
 
@@ -278,13 +289,17 @@ export default async function ContractsPage({
                           key={i}
                           className={`px-2 py-2 text-center whitespace-nowrap border-b border-gray-100 tabular-nums ${
                             cell.bench
-                              ? "bg-rose-50 text-rose-600 font-bold"
-                              : cell.changed
-                              ? "bg-amber-100 text-gray-900"
+                              ? "bg-rose-100 text-rose-700 font-bold"
+                              : cell.isEnd
+                              ? "bg-blue-100 text-blue-700"
+                              : cell.trend === "up"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : cell.trend === "down"
+                              ? "bg-violet-100 text-violet-700"
                               : cell.rate != null
                               ? "text-gray-700"
                               : ""
-                          } ${months[i].key === nowYm ? "ring-1 ring-inset ring-indigo-200" : ""}`}
+                          } ${months[i].key === nowYm ? "ring-1 ring-inset ring-indigo-300" : ""}`}
                         >
                           {cell.bench
                             ? "待機"
@@ -302,9 +317,13 @@ export default async function ContractsPage({
         )}
       </Card>
 
-      <p className="text-xs text-gray-400 mt-3">
-        セル＝客先単価（実単価）。<span className="text-amber-600">黄色</span>＝前月から単価変動／
-        <span className="text-rose-600">待機</span>＝契約の谷間。現在月は青色。「自社＝自社社員 / PT＝パートナー社員」。
+      <p className="text-xs text-gray-500 mt-3 flex flex-wrap gap-x-3 gap-y-1">
+        <span>セル＝客先単価（実単価）</span>
+        <span><span className="inline-block w-3 h-3 align-middle bg-blue-100 border border-blue-300 mr-1"></span>契約終了月</span>
+        <span><span className="inline-block w-3 h-3 align-middle bg-yellow-100 border border-yellow-300 mr-1"></span>単価アップ</span>
+        <span><span className="inline-block w-3 h-3 align-middle bg-violet-100 border border-violet-300 mr-1"></span>単価ダウン</span>
+        <span><span className="inline-block w-3 h-3 align-middle bg-rose-100 border border-rose-300 mr-1"></span>稼動なし（待機・育休・休職）</span>
+        <span className="text-gray-400">／ 自社＝自社社員・PT＝パートナー社員</span>
       </p>
     </div>
   );
