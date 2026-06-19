@@ -27,8 +27,11 @@ function monthsBetween(from: string, to: string): { y: number; m: number; key: s
 }
 
 type RowContract = {
+  id: string;
   monthlyRate: number;
+  engineerRate: number | null;
   rateType: string;
+  engineerRateType: string;
   startOn: Date | null;
   endOn: Date | null;
   asgStart: Date | null;
@@ -105,8 +108,11 @@ export default async function ContractsPage({
       });
     }
     rowMap.get(key)!.contracts.push({
+      id: c.id,
       monthlyRate: c.monthlyRate,
+      engineerRate: c.engineerRate,
       rateType: c.rateType,
+      engineerRateType: c.engineerRateType,
       startOn: c.startOn,
       endOn: c.endOn,
       asgStart: c.assignment.startOn,
@@ -126,6 +132,9 @@ export default async function ContractsPage({
     bench: boolean;
     trend: "up" | "down" | "none";
     isEnd: boolean;
+    contractId: string | null;
+    engRate: number | null;
+    engHourly: boolean;
   };
   function buildCells(row: Row): Cell[] {
     const raw = months.map(({ y, m }) => {
@@ -139,7 +148,14 @@ export default async function ContractsPage({
         if (afterStart && beforeEnd) {
           // 契約終了月＝契約終了日がその月に含まれる
           const isEnd = !!ce && new Date(ce) >= mStart && new Date(ce) <= mEnd;
-          return { rate: c.monthlyRate, hourly: c.rateType === "HOURLY", isEnd };
+          return {
+            rate: c.monthlyRate,
+            hourly: c.rateType === "HOURLY",
+            isEnd,
+            contractId: c.id,
+            engRate: c.engineerRate,
+            engHourly: c.rateType === "HOURLY" && c.engineerRateType === "HOURLY",
+          };
         }
       }
       return null;
@@ -153,11 +169,29 @@ export default async function ContractsPage({
         if (prevRate != null && x.rate > prevRate) trend = "up";
         else if (prevRate != null && x.rate < prevRate) trend = "down";
         prevRate = x.rate;
-        return { rate: x.rate, hourly: x.hourly, bench: false, trend, isEnd: x.isEnd };
+        return {
+          rate: x.rate,
+          hourly: x.hourly,
+          bench: false,
+          trend,
+          isEnd: x.isEnd,
+          contractId: x.contractId,
+          engRate: x.engRate,
+          engHourly: x.engHourly,
+        };
       }
       // 稼動がない月（契約の谷間＝待機・育休・休職など）
       const bench = firstIdx >= 0 && i > firstIdx && i < lastIdx;
-      return { rate: null, hourly: false, bench, trend: "none" as const, isEnd: false };
+      return {
+        rate: null,
+        hourly: false,
+        bench,
+        trend: "none" as const,
+        isEnd: false,
+        contractId: null,
+        engRate: null,
+        engHourly: false,
+      };
     });
   }
 
@@ -301,11 +335,27 @@ export default async function ContractsPage({
                               : ""
                           } ${months[i].key === nowYm ? "ring-1 ring-inset ring-indigo-300" : ""}`}
                         >
-                          {cell.bench
-                            ? "待機"
-                            : cell.rate != null
-                            ? `${cell.rate.toLocaleString("ja-JP")}${cell.hourly ? "/h" : ""}`
-                            : ""}
+                          {cell.bench ? (
+                            "待機"
+                          ) : cell.rate != null ? (
+                            <Link
+                              href={cell.contractId ? `/contracts/${cell.contractId}/edit` : "#"}
+                              className="block leading-tight hover:underline"
+                            >
+                              <div>
+                                {cell.rate.toLocaleString("ja-JP")}
+                                {cell.hourly ? "/h" : ""}
+                              </div>
+                              {cell.engRate != null && (
+                                <div className="text-[11px] text-indigo-500">
+                                  {cell.engRate.toLocaleString("ja-JP")}
+                                  {cell.engHourly ? "/h" : ""}
+                                </div>
+                              )}
+                            </Link>
+                          ) : (
+                            ""
+                          )}
                         </td>
                       ))}
                     </tr>
