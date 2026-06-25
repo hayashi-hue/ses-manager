@@ -1,22 +1,11 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import {
-  yen,
-  manYen,
-  yenWithUnit,
-  formatDate,
-  currentYearMonth,
-  formatYearMonth,
-  calcMargin,
-} from "@/lib/utils";
+import { yen, manYen, currentYearMonth, formatYearMonth, calcMargin } from "@/lib/utils";
 import {
   PageHeader,
   Card,
   StatCard,
   Badge,
-  Table,
-  Th,
-  Td,
 } from "@/components/ui";
 import {
   EngineerStatusLabel,
@@ -26,25 +15,11 @@ import {
   AssignmentStatusLabel,
   AssignmentStatusColor,
 } from "@/lib/enums";
-import {
-  statutoryAnnualLeaveDays,
-  paidLeaveDaysTaken,
-  overtimeHours,
-  staleRateForEngineer,
-  type RateContractInput,
-  type StaleRate,
-} from "@/lib/metrics";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const ym = currentYearMonth();
-  const now = new Date();
-  // 直近1年の起点（有給取得率・平均残業の集計範囲）
-  const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-  const ymFrom = `${oneYearAgo.getFullYear()}-${String(
-    oneYearAgo.getMonth() + 1
-  ).padStart(2, "0")}`;
 
   const [
     engineers,
@@ -55,9 +30,6 @@ export default async function DashboardPage() {
     leaveIntents,
     pendingOfferCount,
     pendingRequestCount,
-    paidLeaves,
-    recentTimesheets,
-    allContracts,
   ] = await Promise.all([
     prisma.engineer.findMany({ where: { status: { not: "RETIRED" } } }),
     prisma.assignment.findMany({
@@ -79,28 +51,6 @@ export default async function DashboardPage() {
     }),
     prisma.projectOffer.count({ where: { status: "OFFERED" } }),
     prisma.workflowRequest.count({ where: { status: "SUBMITTED" } }),
-    // 直近1年に承認された有給休暇（取得実績）
-    prisma.workflowRequest.findMany({
-      where: {
-        type: "PAID_LEAVE",
-        status: "APPROVED",
-        startDate: { gte: oneYearAgo },
-      },
-      select: { days: true, hours: true },
-    }),
-    // 直近12ヶ月の工数（残業集計用）
-    prisma.timesheet.findMany({
-      where: { yearMonth: { gte: ymFrom }, workedHours: { gt: 0 } },
-      select: { workedHours: true, yearMonth: true },
-    }),
-    // 単価据え置き判定用：全契約＋アサイン・要員・案件
-    prisma.contract.findMany({
-      include: {
-        assignment: {
-          include: { engineer: true, project: { include: { client: true } } },
-        },
-      },
-    }),
   ]);
 
   const totalActive = engineers.length;
@@ -119,66 +69,6 @@ export default async function DashboardPage() {
   }
   const { profit, rate } = calcMargin(sellSum, costSum);
   const unpaidTotal = invoicesUnpaid.reduce((s, i) => s + i.total, 0);
-
-  // 有給取得率（直近1年・法定付与日数ベース）。協力会社(BP)は自社付与対象外として除外
-  const grantEngineers = engineers.filter((e) => e.employmentType !== "BP");
-  const grantedLeaveDays = grantEngineers.reduce(
-    (s, e) => s + statutoryAnnualLeaveDays(e.joinedOn, now),
-    0
-  );
-  const takenLeaveDays = paidLeaves.reduce((s, r) => s + paidLeaveDaysTaken(r), 0);
-  const leaveRate =
-    grantedLeaveDays > 0
-      ? Math.round((takenLeaveDays / grantedLeaveDays) * 1000) / 10
-      : 0;
-
-  // 平均残業時間（直近12ヶ月・1人月あたり。所定=営業日数×8時間）
-  const totalOvertime = recentTimesheets.reduce(
-    (s, t) => s + overtimeHours(t.workedHours, t.yearMonth),
-    0
-  );
-  const avgOvertime =
-    recentTimesheets.length > 0
-      ? Math.round((totalOvertime / recentTimesheets.length) * 10) / 10
-      : 0;
-
-  // 平均単価（稼働中アサインの客先請求単価・月額）
-  const sellRates = activeAssignments.filter((a) => a.sellRate > 0);
-  const avgSellRate =
-    sellRates.length > 0
-      ? Math.round(sellRates.reduce((s, a) => s + a.sellRate, 0) / sellRates.length)
-      : 0;
-
-  // 単価据え置き（実単価が6ヶ月以上変わっていない要員）。要員ごとに契約タイムラインから判定
-  const byEngineer = new Map<
-    string,
-    { engineer: (typeof engineers)[number]; items: RateContractInput[] }
-  >();
-  for (const c of allContracts) {
-    const a = c.assignment;
-    const e = a?.engineer;
-    if (!e || e.status === "RETIRED") continue;
-    const entry = byEngineer.get(e.id) ?? { engineer: e, items: [] };
-    entry.items.push({
-      contractId: c.id,
-      monthlyRate: c.monthlyRate,
-      engineerRate: c.engineerRate,
-      rateType: c.rateType,
-      startOn: c.startOn,
-      signedOn: c.signedOn,
-      createdAt: c.createdAt,
-      active: a.status === "ACTIVE" || a.status === "ORDERED",
-      clientName: a.project?.client?.name ?? "—",
-      projectTitle: a.project?.title ?? "—",
-    });
-    byEngineer.set(e.id, entry);
-  }
-  const staleRates: (StaleRate & { engineer: (typeof engineers)[number] })[] = [];
-  for (const { engineer, items } of byEngineer.values()) {
-    const r = staleRateForEngineer(items, now, 6);
-    if (r) staleRates.push({ ...r, engineer });
-  }
-  staleRates.sort((a, b) => b.monthsHeld - a.monthsHeld);
 
   return (
     <div>
@@ -216,37 +106,6 @@ export default async function DashboardPage() {
           sub={`${invoicesUnpaid.length} 件`}
           accent={unpaidTotal > 0 ? "text-rose-600" : "text-emerald-600"}
           icon="🧾"
-        />
-      </div>
-
-      {/* 追加KPI: 有給取得率・平均残業時間・平均単価 */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        <StatCard
-          label="有給取得率"
-          value={`${leaveRate}%`}
-          sub={`取得 ${Math.round(takenLeaveDays * 10) / 10}日 / 付与 ${grantedLeaveDays}日（直近1年・法定付与基準）`}
-          accent={leaveRate >= 50 ? "text-emerald-600" : "text-amber-600"}
-          icon="🏖️"
-        />
-        <StatCard
-          label="平均残業時間"
-          value={`${avgOvertime} h`}
-          sub="直近12ヶ月・1人月あたり（所定8h/日換算）"
-          accent={
-            avgOvertime <= 20
-              ? "text-emerald-600"
-              : avgOvertime <= 45
-                ? "text-amber-600"
-                : "text-rose-600"
-          }
-          icon="⏱️"
-        />
-        <StatCard
-          label="平均単価"
-          value={manYen(avgSellRate)}
-          sub={`稼働中 ${sellRates.length} 名の客先請求単価（月額）`}
-          accent="text-indigo-600"
-          icon="💹"
         />
       </div>
 
@@ -301,89 +160,6 @@ export default async function DashboardPage() {
           </Card>
         </div>
       )}
-
-      {/* 単価据え置き（実単価が半年以上変わっていない要員） */}
-      <Card className="p-5 mb-6 border-l-4 border-l-rose-400">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-gray-900 text-sm">
-            💰 単価が半年以上変わっていない要員
-            {staleRates.length > 0 && (
-              <Badge className="ml-2 bg-rose-100 text-rose-700">
-                {staleRates.length} 名
-              </Badge>
-            )}
-          </h2>
-          <Link href="/contracts" className="text-xs text-indigo-600 hover:underline">
-            契約一覧へ →
-          </Link>
-        </div>
-        {staleRates.length === 0 ? (
-          <p className="text-sm text-gray-400">
-            半年以上単価が据え置かれている要員はいません
-          </p>
-        ) : (
-          <Table
-            head={
-              <>
-                <Th>氏名</Th>
-                <Th>取引先／案件</Th>
-                <Th className="text-right">現在単価（実単価）</Th>
-                <Th className="text-right">据え置き</Th>
-                <Th>適用開始</Th>
-                <Th></Th>
-              </>
-            }
-          >
-            {staleRates.map((s) => (
-              <tr key={s.contractId} className="hover:bg-gray-50">
-                <Td>
-                  <Link
-                    href={`/engineers/${s.engineer.id}`}
-                    className="text-indigo-600 hover:underline"
-                  >
-                    {s.engineer.name}
-                  </Link>
-                </Td>
-                <Td className="text-gray-500 text-xs">
-                  {s.clientName}／{s.projectTitle}
-                </Td>
-                <Td className="text-right">
-                  <div className="text-gray-900">
-                    {yenWithUnit(s.currentRate, s.rateType)}
-                  </div>
-                  {s.currentEngineerRate != null && (
-                    <div className="text-xs text-blue-500">
-                      提示 {yen(s.currentEngineerRate)}
-                    </div>
-                  )}
-                </Td>
-                <Td className="text-right">
-                  <Badge
-                    className={
-                      s.monthsHeld >= 12
-                        ? "bg-rose-100 text-rose-700"
-                        : "bg-amber-100 text-amber-700"
-                    }
-                  >
-                    {s.monthsHeld}ヶ月
-                  </Badge>
-                </Td>
-                <Td className="text-gray-500 text-xs">
-                  {formatDate(s.unchangedSince)}
-                </Td>
-                <Td className="text-right">
-                  <Link
-                    href={`/contracts/${s.contractId}/edit`}
-                    className="text-xs text-indigo-600 hover:underline whitespace-nowrap"
-                  >
-                    単価を見直す →
-                  </Link>
-                </Td>
-              </tr>
-            ))}
-          </Table>
-        )}
-      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 待機要員リスト */}
